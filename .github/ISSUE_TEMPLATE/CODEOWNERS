@@ -1,0 +1,22 @@
+# CODEOWNERS for L3MN05
+# These owners will be requested for review when someone opens a pull request.
+
+# Default owners for everything in the repo
+*       @nightmoose
+
+# Critical security and configuration files
+SECURITY.md         @nightmoose
+.github/dependabot.yml   @nightmoose
+config.yaml         @nightmoose
+.env.example        @nightmoose
+
+# Core architecture and skills
+architecture.md     @nightmoose
+skills/             @nightmoose
+tools/              @nightmoose
+utils/              @nightmoose
+
+# Docker and deployment
+docker-compose.yml  @nightmoose
+Dockerfile*         @nightmoose
+install.sh          @nightmoose

@@ -1,0 +1,118 @@
+# config.example.yaml - copy to config.yaml and fill in your own values
+workspace: "/workspace"
+
+# Local LLM (primary workhorse)
+#local_model: "qwen2.5-coder:32b-instruct-q5_K_M"
+local_model: "qwen2.5-coder:14b"
+#local_model: "qwen3-coder-next:q4_K_M"
+#local_model: "qwen2.5-coder:3b"   # ← was 7b or 14b
+
+# Remote LLM (quality boost / fallback)
+validation:
+  enabled: true
+  base_url: "https://api.x.ai/v1"
+  api_key_env: "REMOTE_API_KEY"
+  model: "grok-4-1-fast-reasoning"
+  temperature: 0.1
+
+# Jira settings
+jira:
+  enabled: true
+  jql: '(sprint in openSprints() OR sprint in futureSprints()) AND issuetype not in (Epic) ORDER BY created DESC'
+  poll_minutes: 120
+  start_status: "Backlog"
+  done_status: "In Progress"
+  #scaffold_jql: 'status = "Backlog" AND (sprint in openSprints() OR sprint in futureSprints()) AND issuetype not in (Epic) ORDER BY created DESC'
+  #scaffold_jql: 'key=NIGHTMOOSE-1'
+  scaffold_jql: 'status = "To Do" AND (sprint in openSprints() OR sprint in futureSprints()) AND issuetype not in (Epic) ORDER BY created DESC'
+  improve_jql: 'status = "In Progress" AND (sprint in openSprints() OR sprint in futureSprints()) AND issuetype not in (Epic) ORDER BY updated DESC'
+  review_jql: 'status = "Done" AND (sprint in openSprints() OR sprint in futureSprints()) AND issuetype not in (Epic) ORDER BY updated DESC'
+  mirror_jql: 'project = "HORACE" AND summary ~ "[Mirror]" AND created > -30d AND status != "Done" ORDER BY created DESC'
+  review_threshold_hours: 24
+  auto_pr_reviews: false
+  write_enabled: true
+
+# Skills configuration
+skills_dir: "skills"          # folder where your SKILL.md files live
+
+# Multi-client support (one block per client; all values below are placeholders)
+clients:
+  example-client:
+    name: "Example Client"
+    jira:
+      url: "https://your-company.atlassian.net"
+      username: "you@example.com"
+      token_env: "JIRA_TOKEN_EXAMPLE"
+      project_key: "EXAMPLE"
+    context_repo: "your-org/your-repo"
+    output_repo: "your-org/your-output-repo"
+    context_epic_key: "EXAMPLE-1"
+
+    # Skill limiting
+    enabled_skills:
+      - "research"
+      - "documentation"
+      - "code_implementation"
+      - "testing"
+      - "data_architect"
+      - "deployment"
+      - "final_review"
+
+    # Per-client LLM control
+    llm_mode: "local"          # Options: "local", "remote", "blended"
+    # local  = always use local_model (private, no cloud calls)
+    # remote = always use remote validation model
+    # blended = local primary + remote for planning/final-review
+
+    tech_preferences:
+      backend: "Python 3.11+ with type hints"
+      database: "PostgreSQL or SQLite"
+
+# Output/consultant Jira (for writes)
+output_jira:
+  url: "https://your-company.atlassian.net"
+  username: "you@example.com"
+  token_env: "JIRA_TOKEN_EXAMPLE"
+  project_key: "EXAMPLE"
+
+# Notion support
+notion:
+  enabled: false
+  api_key_env: "NOTION_API_KEY"
+  database_id: ""
+  status_property: "Status"
+  scaffold_value: "To Do"
+  done_value: "Done"
+  parent_page_id: ""   # your Notion page ID
+
+# Default house style (used if no horace_style.md in repo)
+default_guidelines: |
+  Use modern Python 3.11+ with type hints.
+  Folder structure: src/, tests/, data/.
+  Naming: snake_case for functions/files.
+  Always include README.md with setup.
+  For dbt: Keep simple, avoid over-YAML; use clear SQL.
+  For data warehouse projects: include SQL DDL, sample data loader, and ER diagram in Markdown.
+
+tech_rules:
+  python: |
+    For Python: Use Python 3.11+, type hints, poetry for dependencies.
+    Follow snake_case naming for files, functions, and variables.
+    Keep code clean, readable, with clear comments and error handling.
+    Prefer simple, modern patterns. Avoid over-engineering.
+
+  general: |
+    Default to simple, maintainable architecture.
+    Prefer Flask (or similar lightweight backend) unless the ticket specifies otherwise.
+    For frontend: Tailwind CSS + vanilla JS/HTML for mobile-first responsive design.
+    Database: PostgreSQL or SQLite unless specified.
+    Video/file storage: Use cloud storage (e.g. S3) with signed URLs when needed.
+    Authentication: JWT or Flask-Login with secure password hashing.
+    Always prioritize mobile-first UI, security, and scalability as mentioned in the ticket.
+    Do NOT use dbt, data warehouse tools, or complex ETL unless the ticket explicitly requires them.
+
+# Safety / budget
+soft_daily_budget_usd: 10.0
+
+# Grok review for plans
+grok_review_plan: true

@@ -1,0 +1,52 @@
+ =============================================
+# L3MN05 .gitignore - protects secrets + temp files
+# Simple, complete, zero problems introduced.
+# Just copy-paste this whole block into .gitignore
+# =============================================
+
+# === SECRETS (never commit these) ===
+.env
+#env.example   # optional - you can remove this line if you want to keep the template
+
+# === Python runtime ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# === Mac / OS junk ===
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# === Logs & temp ===
+*.log
+*.log.*
+logs/
+
+# === Docker / build artifacts (optional but clean) ===
+*.dockerignore
+.docker/
+__pycache__/
+*.egg-info/
+
+# === Editor junk ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Beyond Compare Copies ---
+__incoming/
+# Local config (copy from config.example.yaml)
+config.yaml

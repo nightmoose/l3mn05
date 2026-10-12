@@ -1,0 +1,112 @@
+# docker-compose.yml - L3MN05 Simplified v0.9.0 (worker_ naming convention)
+# Fixed & improved by Grok - March 2026
+# Changes from your version:
+#   • Added command: to worker-scaffold (matches rename to worker_scaffold.py)
+#   • Updated horace-chat + horace-slack depends_on and WORKER_URL to use new service name "worker-scaffold"
+#   • Added clarifying comments so future changes are obvious
+#   • Everything else exactly as you had it
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: l3mn05-ollama
+    restart: unless-stopped
+    ports: ["11434:11434"]
+    volumes: 
+      - ollama_data:/root/.ollama
+      - ./ollama-startup.sh:/ollama-startup.sh:ro
+    entrypoint: ["/ollama-startup.sh"]
+    deploy:
+      resources:
+        limits:
+          memory: 20G
+        reservations:
+          memory: 12G
+
+  # === MAIN SCAFFOLD WORKER (still runs Flask + create_ticket endpoint) ===
+  worker-scaffold:
+    build:
+      context: .
+      dockerfile: dockerfile
+    container_name: l3mn05-worker-scaffold
+    restart: unless-stopped
+    depends_on: [ollama]
+    command: python -u worker_scaffold.py
+    ports:
+      - "5010:5000"                         # Flask health + create_ticket still here
+    volumes:
+      - ~/consulting:/workspace
+      - ./config.yaml:/app/config.yaml:ro
+      - ./.env:/app/.env:ro
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # === STATUS-SPECIFIC WORKERS (no Flask, pure background) ===
+  worker-improve:
+    build: .
+    container_name: l3mn05-worker-improve
+    restart: unless-stopped
+    depends_on: [ollama]
+    command: python -u worker_improve.py
+    volumes:
+      - ~/consulting:/workspace
+      - ./config.yaml:/app/config.yaml:ro
+      - ./.env:/app/.env:ro
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  worker-review:
+    build: .
+    container_name: l3mn05-worker-review
+    restart: unless-stopped
+    depends_on: [ollama]
+    command: python -u worker_review.py
+    volumes:
+      - ~/consulting:/workspace
+      - ./config.yaml:/app/config.yaml:ro
+      - ./.env:/app/.env:ro
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # === CHAT & SLACK (now correctly point to Scaffold worker) ===
+  horace-chat:
+    build:
+      context: .
+      dockerfile: dockerfile.chat
+    container_name: l3mn05-chat
+    restart: unless-stopped
+    depends_on: [worker-scaffold]              # ← FIXED: was l3mn05-worker
+    ports: ["8080:8080"]
+    environment:
+      - GROK_API_KEY=${REMOTE_API_KEY}
+      - WORKER_URL=http://worker-scaffold:5000 # ← FIXED: now uses Docker service name
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+
+  horace-slack:
+    build:
+      context: .
+      dockerfile: dockerfile.slack
+    container_name: l3mn05-slack
+    restart: unless-stopped
+    depends_on: [worker-scaffold]              # ← FIXED: was l3mn05-worker
+    environment:
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
+      - GROK_API_KEY=${REMOTE_API_KEY}
+      - WORKER_URL=http://worker-scaffold:5000 # ← FIXED: now uses Docker service name
+
+volumes:
+  ollama_data:
