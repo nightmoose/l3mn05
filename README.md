@@ -66,3 +66,4 @@ To add a skill, see [Adding a New Skill](architecture.md#adding-a-new-skill-deve
 
 ## License
 MIT © 2026 nightmoose. See [LICENSE](LICENSE).
+
