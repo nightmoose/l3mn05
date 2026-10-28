@@ -24,4 +24,4 @@ jobs:
         run: python -m compileall -q .
 
       - name: Smoke tests
-        run: pytest
+        run: python -m pytest
