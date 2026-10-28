@@ -26,5 +26,9 @@ def do_scaffolds(issue_data, client_id, config):
 
 
 if __name__ == "__main__":
+    import sys
+    if "--demo" in sys.argv:
+        from demo_run import main as demo_main
+        raise SystemExit(demo_main([arg for arg in sys.argv[1:] if arg != "--demo"]))
     # Uses the shared run_main_loop from utils (polling + client handling)
     run_main_loop(do_scaffolds, "scaffold_jql", "scaffold")

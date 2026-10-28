@@ -40,12 +40,9 @@ docker compose build --no-cache
 docker compose up -d
 
 echo ""
-echo "✅ L3MN05 Horace is ready!"
-echo "🌐 Open your browser to: http://localhost:8080"
-echo "   (or your Tailscale IP:8080)"
-echo ""
-echo "Horace is now using Grok for conversation and your local Ollama worker for ticket processing."
-echo "Just type to him like a real consultant. Say 'create a new ticket...' when ready."
+echo "✅ L3MN05 is ready."
+echo "Workers use the local Ollama model. Chat on http://localhost:8080 uses a remote model unless L3MN05_OFFLINE=1."
+echo "Air-gapped demo, no Jira: L3MN05_OFFLINE=1 python demo_run.py"
 echo ""
 echo "To stop: docker compose down"
 echo "To update: git pull && ./install.sh"

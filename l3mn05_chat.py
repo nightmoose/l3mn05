@@ -8,12 +8,13 @@
 
 from flask import Flask, render_template_string, request, jsonify, session
 import os
-import yaml
-from openai import OpenAI
-import markdown
-import requests
 import json
 from datetime import timedelta  # NEW: For permanent session lifetime
+
+from utils.offline import install_network_guard, is_offline, offline_message
+from utils.config import load_config
+
+install_network_guard()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or "horace_fixed_secret_2026"  # NEW: Fixed key (env or fallback) to survive restarts
@@ -22,19 +23,27 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)  # NEW: Sessions la
 
 print("=== Horace Chat (Multi-Client FINAL) starting ===")
 
-GROK_API_KEY = os.getenv("GROK_API_KEY")
 WORKER_URL = os.getenv("WORKER_URL", "http://l3mn05-worker:5000")
 
-with open("config.yaml") as f:
-    CONFIG = yaml.safe_load(f)
-CLIENTS = CONFIG.get("clients", {"example-client": {"name": "Example Client"}})
 
-if not GROK_API_KEY:
-    print("ERROR: GROK_API_KEY missing!")
-    GROK = None
-else:
-    print(f"Grok API key loaded")
-    GROK = OpenAI(base_url="https://api.x.ai/v1", api_key=GROK_API_KEY)
+def _clients():
+    loaded = load_config().get("clients") or {}
+    if not loaded:
+        return {"example-client": {"name": "Example Client"}}
+    return loaded
+
+
+def _grok_client():
+    """Remote chat model. Not constructed while offline."""
+    if is_offline():
+        return None
+    api_key = os.getenv("GROK_API_KEY") or os.getenv("REMOTE_API_KEY")
+    if not api_key:
+        print("ERROR: GROK_API_KEY missing!")
+        return None
+    from openai import OpenAI
+    print("Grok API key loaded")
+    return OpenAI(base_url="https://api.x.ai/v1", api_key=api_key)
 
 def estimate_cost(prompt_tokens, completion_tokens):
     return (prompt_tokens * 0.000005) + (completion_tokens * 0.000015)
@@ -141,23 +150,45 @@ def home():
 
 @app.route('/clients')
 def get_clients():
-    client_options = {cid: c['name'] for cid, c in CLIENTS.items()}
+    clients = _clients()
+    client_options = {cid: c.get('name', cid) for cid, c in clients.items()}
     return jsonify(client_options)
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    data = request.json
-    message = data['message']
+    data = request.json or {}
+    message = data.get('message', '')
     history = data.get('history', [])
+    if is_offline():
+        reply = offline_message("Horace chat (it uses a remote model)")
+        return jsonify({
+            "reply": reply,
+            "history": history,
+            "cost": session.get('cost', 0),
+            "offline": True,
+        })
+
     client_id = data.get('client_id', session.get("current_client", "example-client"))
     session['current_client'] = client_id
+    clients = _clients()
 
     try:
+        grok = _grok_client()
+        if grok is None:
+            return jsonify({
+                "reply": "Remote chat is not configured. Set GROK_API_KEY, or set L3MN05_OFFLINE=1 to use the local model only.",
+                "history": history,
+                "cost": session.get('cost', 0),
+            })
+
+        import markdown
+        import requests
+        client_name = clients.get(client_id, {}).get('name', client_id)
         messages = [
-            {"role": "system", "content": f"You are Horace, senior consultant working for {CLIENTS[client_id]['name']}. Be helpful, concise, professional."}
+            {"role": "system", "content": f"You are Horace, senior consultant working for {client_name}. Be helpful, concise, professional."}
         ] + history + [{"role": "user", "content": message}]
 
-        response = GROK.chat.completions.create(
+        response = grok.chat.completions.create(
             model="grok-4",
             messages=messages,
             tools=[{
@@ -189,7 +220,7 @@ def chat():
                 print(f"[TOOL] Creating ticket for client {client_id}")
                 r = requests.post(f"{WORKER_URL}/create_ticket", json=args, timeout=15)
                 result = r.json()
-                reply += f"\n\n✅ Created ticket **{result.get('key')}** for {CLIENTS[client_id]['name']}!"
+                reply += f"\n\n✅ Created ticket **{result.get('key')}** for {client_name}!"
 
         reply_html = markdown.markdown(reply, extensions=['tables', 'fenced_code'])
 

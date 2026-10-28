@@ -11,7 +11,8 @@ import subprocess
 import yaml
 from datetime import datetime
 
-from utils.config import WORKSPACE, config
+from utils.config import config, get_workspace
+from utils.offline import is_offline, offline_message
 import tools.jira as source
 from tools.git import get_repo_paths, gather_repo_context, create_branch, create_pr, refresh_repo_context
 from tools.notion import publish_to_notion
@@ -19,6 +20,15 @@ from tools.notion import publish_to_notion
 
 def run_main_loop(process_func, jql_type, log_prefix="WORKER"):
     """Original main polling loop."""
+    if is_offline():
+        print(offline_message("Jira polling"))
+        print(f"[{datetime.now()}] [{log_prefix}] Use `python demo_run.py` to run a ticket from a local file.")
+        if os.getenv("L3MN05_CONTAINER") == "1":
+            print(f"[{datetime.now()}] [{log_prefix}] Container will stay idle so Docker does not restart-loop.")
+            while True:
+                time.sleep(3600)
+        return
+
     print(f"[{datetime.now()}] [{log_prefix}] Worker ready. Polling Jira...")
 
     while True:
@@ -79,6 +89,11 @@ def get_client_jql(config, client_id, jql_type):
 
 def process_ticket_base(issue_data, client_id, config, log_prefix="WORKER"):
     """Original ticket setup with safe description handling from your original code."""
+    if is_offline():
+        print(offline_message("Ticket setup (Jira mirror and GitHub clone)"))
+        print(f"[{datetime.now()}] [{log_prefix}] Use `python demo_run.py` for a local ticket.")
+        return None
+
     client = config["clients"][client_id]
 
     context_full, output_full, _, _ = get_repo_paths(client, config)
@@ -102,14 +117,15 @@ def process_ticket_base(issue_data, client_id, config, log_prefix="WORKER"):
     )
 
     # Context repo clone
-    temp_dir = tempfile.mkdtemp(dir=WORKSPACE)
+    os.makedirs(get_workspace(), exist_ok=True)
+    temp_dir = tempfile.mkdtemp(dir=get_workspace())
     context_token = os.getenv(f"GITHUB_TOKEN_{client_id.upper()}") or os.getenv("GITHUB_TOKEN")
     clone_cmd = ["git", "clone", f"https://oauth2:{context_token}@github.com/{context_full}.git", temp_dir]
     subprocess.run(clone_cmd, check=True, capture_output=True, text=True)
     context_path = temp_dir
 
     # Output repo clone
-    output_path = temp_dir if context_full == output_full else tempfile.mkdtemp(dir=WORKSPACE)
+    output_path = temp_dir if context_full == output_full else tempfile.mkdtemp(dir=get_workspace())
     if context_full != output_full:
         output_token = os.getenv("GITHUB_TOKEN")
         output_clone_cmd = ["git", "clone", f"https://oauth2:{output_token}@github.com/{output_full}.git", output_path]
@@ -130,6 +146,8 @@ def run_worker_base(issue_data, client_id, config, log_prefix, worker_func):
     context_path = None
     try:
         unpacked = process_ticket_base(issue_data, client_id, config, log_prefix)
+        if not unpacked:
+            return
         key, repo_context, jira_text, output_path, output_full, branch_name, write_client, context_path = unpacked
 
         tech_rules = ""

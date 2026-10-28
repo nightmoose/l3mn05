@@ -4,8 +4,21 @@ import os
 import sys
 import requests
 
+from utils.offline import is_offline, offline_message
+
 class JiraClient:
     def __init__(self, jira_config):
+        self._offline = is_offline()
+        self.jira = None
+        self.token = ""
+        self.url = (jira_config or {}).get("url", "")
+        self.username = (jira_config or {}).get("username", "")
+        self.project_key = (jira_config or {}).get("project_key", "")
+        if self._offline:
+            print(offline_message("Jira"))
+            print(f"[{datetime.now()}] [JIRA] No connection opened.")
+            return
+
         print(f"[{datetime.now()}] [JIRA-DEBUG] __init__ started with config: {jira_config}")
         
         self.url = jira_config["url"]
@@ -46,8 +59,17 @@ class JiraClient:
             sys.stdout.flush()
             raise
 
+    def _refuse(self, action, value):
+        if self._offline or is_offline():
+            print(offline_message(f"Jira ({action})"))
+            return True, value
+        return False, None
+
     def get_issue(self, key):
         """Fetch a single Jira issue by key."""
+        blocked, value = self._refuse("get issue", None)
+        if blocked:
+            return value
         try:
             issue = self.jira.issue(key)
             return issue.raw  # Return raw dict for fields access
@@ -57,6 +79,9 @@ class JiraClient:
     
     def get_pending_tickets(self, jql):
         """Get list of pending tickets (raw issues)."""
+        blocked, value = self._refuse("polling", [])
+        if blocked:
+            return value
         try:
             print(f"[{datetime.now()}] [JIRA] Polling with JQL: {jql}")
             sys.stdout.flush()
@@ -86,6 +111,9 @@ class JiraClient:
 
     def add_comment(self, issue_key, comment_text):
         """Add a comment (ADF body)."""
+        blocked, value = self._refuse("comment", False)
+        if blocked:
+            return value
         try:
             adf_body = {
                 "version": 1,
@@ -101,6 +129,9 @@ class JiraClient:
 
     def transition_issue(self, issue_key, status_name):
         """Transition issue to a new status."""
+        blocked, value = self._refuse("transition", False)
+        if blocked:
+            return value
         try:
             self.jira.transition_issue(issue_key, status_name)
             print(f"[{datetime.now()}] [JIRA] Moved {issue_key} to {status_name}")
@@ -114,6 +145,9 @@ class JiraClient:
         Create mirror ticket in output Jira as sub-task under Epic if provided.
         Handles both ADF dict and plain string description safely.
         """
+        blocked, value = self._refuse("create mirror ticket", None)
+        if blocked:
+            return value
         fields = {
             "project": {"key": self.project_key},
             "summary": f"[Mirror] {summary}",
@@ -156,6 +190,9 @@ class JiraClient:
 
     def add_label(self, issue_key, label):
         """Add a label to an issue (used for mirrors)."""
+        blocked, value = self._refuse("add label", False)
+        if blocked:
+            return value
         try:
             # Fetch current issue to get labels
             issue = self.jira.issue(issue_key)
@@ -184,6 +221,9 @@ class JiraClient:
 
     def get_processed_original_keys(self, jql):
         """Fetch recent mirrors and extract original keys from labels (with pagination)."""
+        blocked, value = self._refuse("processed keys", [])
+        if blocked:
+            return value
         try:
             issues = []
             start_at = 0

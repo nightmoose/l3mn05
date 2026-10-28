@@ -4,6 +4,8 @@ WORKDIR /app
 COPY requirements.slack.txt .
 RUN pip install --no-cache-dir -r requirements.slack.txt
 
+# The Slack bot imports the offline switch from utils.
+COPY utils/ utils/
 COPY l3mn05_slack.py .
 
 CMD ["python", "-u", "l3mn05_slack.py"]

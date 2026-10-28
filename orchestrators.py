@@ -9,7 +9,6 @@
 
 import os
 import re
-import yaml
 from datetime import datetime
 
 # Clean imports — no more broad "from utils import *"
@@ -21,7 +20,9 @@ from tools.git import git_commit_push, refresh_repo_context, create_pr
 from tools.notion import publish_to_notion
 from tools.jira import JiraClient   # keep if you didn't move jira.py yet
 
+from utils.config import load_config
 from utils.llm import call_llm
+from utils.offline import is_offline
 from skills_loader import load_skills
 
 def get_llm_mode_for_client(client_id, config):
@@ -156,12 +157,12 @@ def horace_plan(
     skills=None,
     mode_addon="",
     client_id=None,
+    llm_call=None,
 ):
     if config is None:
-        with open("config.yaml") as f:
-            config = yaml.safe_load(f)
+        config = load_config()
     if skills is None:
-        skills = []
+        skills = load_skills(config.get("skills_dir", "skills"))
 
     print(f"[{datetime.now()}] [HORACE] Creating plan with {len(skills)} skills...")
 
@@ -231,18 +232,25 @@ Start directly with # Plan for {key}."""
     #plan_content = call_llm(prompt, temperature=0.1, prefer_remote=True)
     llm_mode = get_llm_mode_for_client(client_id, config)
     prefer_remote = (llm_mode == "remote") or (llm_mode == "blended")
+    if is_offline():
+        prefer_remote = False
 
-    plan_content = call_llm(prompt, temperature=0.1, prefer_remote=prefer_remote)
+    invoke = llm_call or call_llm
+    plan_content = invoke(prompt, temperature=0.1, prefer_remote=prefer_remote) or ""
 
-    # Optional strict review with remote LLM
-    if config.get("grok_review_plan", True) and config.get("validation", {}).get("enabled", False):
+    # Optional strict review with remote LLM. Skipped entirely while offline.
+    if (
+        not is_offline()
+        and config.get("grok_review_plan", True)
+        and config.get("validation", {}).get("enabled", False)
+    ):
         review_prompt = f"""Rewrite the plan below to strictly use only the listed skill names.
 Start directly with # Plan for {key}.
 Output ONLY the corrected Markdown plan.
 
 Original:
 {plan_content}"""
-        corrected = call_llm(review_prompt, temperature=0.1, prefer_remote=True)
+        corrected = invoke(review_prompt, temperature=0.1, prefer_remote=True)
         if len(corrected.strip()) > 200 and "# Plan for" in corrected:
             plan_content = corrected
             print(f"[{datetime.now()}] [HORACE] Remote plan review applied")

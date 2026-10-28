@@ -1,6 +1,15 @@
 # config.example.yaml - copy to config.yaml and fill in your own values
 workspace: "/workspace"
 
+# Application air gap. true, or env L3MN05_OFFLINE=1, refuses outbound calls.
+# Loopback and the host in OLLAMA_BASE_URL stay open for the local model.
+# Jira, GitHub, Notion, Slack, and remote models do not.
+offline: false
+
+# OpenAI-compatible URL of the local model. OLLAMA_BASE_URL overrides this.
+# Docker Compose sets http://ollama:11434/v1 on the worker containers.
+ollama_base_url: "http://127.0.0.1:11434/v1"
+
 # Local LLM (primary workhorse)
 #local_model: "qwen2.5-coder:32b-instruct-q5_K_M"
 local_model: "qwen2.5-coder:14b"

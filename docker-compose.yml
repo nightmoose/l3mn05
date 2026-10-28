@@ -11,6 +11,9 @@ services:
     image: ollama/ollama:latest
     container_name: l3mn05-ollama
     restart: unless-stopped
+    environment:
+      - L3MN05_OFFLINE=${L3MN05_OFFLINE:-0}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5-coder:14b}
     ports: ["11434:11434"]
     volumes: 
       - ollama_data:/root/.ollama
@@ -32,6 +35,11 @@ services:
     restart: unless-stopped
     depends_on: [ollama]
     command: python -u worker_scaffold.py
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434/v1
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5-coder:14b}
+      - L3MN05_OFFLINE=${L3MN05_OFFLINE:-0}
+      - L3MN05_CONTAINER=1
     ports:
       - "5010:5000"                         # Flask health + create_ticket still here
     volumes:
@@ -52,6 +60,11 @@ services:
     restart: unless-stopped
     depends_on: [ollama]
     command: python -u worker_improve.py
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434/v1
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5-coder:14b}
+      - L3MN05_OFFLINE=${L3MN05_OFFLINE:-0}
+      - L3MN05_CONTAINER=1
     volumes:
       - ~/consulting:/workspace
       - ./config.yaml:/app/config.yaml:ro
@@ -69,6 +82,11 @@ services:
     restart: unless-stopped
     depends_on: [ollama]
     command: python -u worker_review.py
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434/v1
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5-coder:14b}
+      - L3MN05_OFFLINE=${L3MN05_OFFLINE:-0}
+      - L3MN05_CONTAINER=1
     volumes:
       - ~/consulting:/workspace
       - ./config.yaml:/app/config.yaml:ro
@@ -92,6 +110,8 @@ services:
     environment:
       - GROK_API_KEY=${REMOTE_API_KEY}
       - WORKER_URL=http://worker-scaffold:5000 # ← FIXED: now uses Docker service name
+      - L3MN05_OFFLINE=${L3MN05_OFFLINE:-0}
+      - L3MN05_CONTAINER=1
     volumes:
       - ./config.yaml:/app/config.yaml:ro
 
@@ -107,6 +127,8 @@ services:
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
       - GROK_API_KEY=${REMOTE_API_KEY}
       - WORKER_URL=http://worker-scaffold:5000 # ← FIXED: now uses Docker service name
+      - L3MN05_OFFLINE=${L3MN05_OFFLINE:-0}
+      - L3MN05_CONTAINER=1
 
 volumes:
   ollama_data:

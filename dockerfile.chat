@@ -4,6 +4,8 @@ WORKDIR /app
 COPY requirements.chat.txt .
 RUN pip install --no-cache-dir -r requirements.chat.txt
 
+# Chat imports the offline switch and lazy config from utils.
+COPY utils/ utils/
 COPY l3mn05_chat.py .
 
 CMD ["python", "l3mn05_chat.py"]
