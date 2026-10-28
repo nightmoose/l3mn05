@@ -1,9 +1,9 @@
 # tools/git.py
 import os
 import subprocess
-import yaml
 from datetime import datetime
-from utils.config import WORKSPACE
+from utils.config import get_workspace, load_config
+from utils.offline import is_offline, offline_message
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
@@ -20,9 +20,16 @@ def git_commit_push(repo_path, message, repo_full=None):
         if commit_result.returncode != 0:
             if "nothing to commit" in commit_result.stderr.lower():
                 print(f"[{datetime.now()}] [GIT] No changes to commit (ok)")
+                if is_offline():
+                    print(offline_message("git push"))
                 return True
             print(f"[{datetime.now()}] [GIT] Commit failed: {commit_result.stderr.strip()}")
             return False
+
+        if is_offline():
+            print(offline_message("git push"))
+            print(f"[{datetime.now()}] [GIT] Commit kept on this machine.")
+            return True
 
         # Authenticated remote if provided
         if repo_full and GITHUB_TOKEN:
@@ -73,13 +80,23 @@ def get_repo_paths(client, config=None):
         raise ValueError(f"Client missing default_repo or context_repo")
     context_slug = context_full.split('/')[-1]
     output_slug = output_full.split('/')[-1]
-    return context_full, output_full, os.path.join(WORKSPACE, context_slug), os.path.join(WORKSPACE, output_slug)
+    workspace = get_workspace()
+    return context_full, output_full, os.path.join(workspace, context_slug), os.path.join(workspace, output_slug)
 
 def ensure_git_repo(repo_full):
     repo_slug = repo_full.split('/')[-1]
-    repo_path = os.path.join(WORKSPACE, repo_slug)
+    repo_path = os.path.join(get_workspace(), repo_slug)
     os.makedirs(repo_path, exist_ok=True)
     if not os.path.exists(os.path.join(repo_path, ".git")):
+        if is_offline():
+            print(offline_message("git clone"))
+            try:
+                subprocess.run(["git", "init", repo_path], check=True)
+                print(f"[{datetime.now()}] [GIT] Empty local repo initialized")
+                return True
+            except Exception as e2:
+                print(f"[{datetime.now()}] [GIT] Setup failed: {e2}")
+                return False
         print(f"[{datetime.now()}] [GIT] Repo not found. Cloning {repo_full}...")
         clone_url = f"https://{GITHUB_TOKEN}@github.com/{repo_full}.git" if GITHUB_TOKEN else f"https://github.com/{repo_full}.git"
         try:
@@ -99,17 +116,9 @@ def ensure_git_repo(repo_full):
     return True
 
 def gather_repo_context(repo_path):
-    """Load config and guidelines from the actual repo path (was fragile relative open)."""
+    """Load guidelines and a short sample of files from the repo."""
     context = []
-    
-    # FIXED: Use full path based on WORKSPACE instead of open("config.yaml")
-    # This prevents crashes when cwd != project root. Falls back gracefully.
-    config_path = os.path.join(os.path.dirname(WORKSPACE), "config.yaml")  # config.yaml lives next to the workspace dir
-    try:
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
-    except (FileNotFoundError, OSError):
-        config = {}  # safe default - never crashes
+    config = load_config() or {}
 
     guidelines_path = os.path.join(repo_path, "horace_style.md")
     if os.path.exists(guidelines_path):
@@ -146,6 +155,9 @@ def gather_repo_context(repo_path):
     return summary
 
 def reset_to_clean_main(repo_path):
+    if is_offline():
+        print(offline_message("git pull"))
+        return False
     try:
         print(f"[{datetime.now()}] [GIT] Resetting to clean main...")
         subprocess.run(["git", "-C", repo_path, "checkout", "main"], check=True, capture_output=True, text=True)
@@ -168,6 +180,9 @@ def create_branch(repo_path, branch_name):
         return None
 
 def create_pr(repo_path, key, summary, branch_name):
+    if is_offline():
+        print(offline_message("Opening a GitHub pull request"))
+        return False
     try:
         title = f"L3MN05 {key}: {summary[:80]}"
         body = f"Automated by L3MN05 Done Worker.\nJira: {key}\nBranch: {branch_name}"

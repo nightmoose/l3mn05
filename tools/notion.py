@@ -1,11 +1,15 @@
 import os
 import re
 from datetime import datetime
-# REMOVED: from utils.config import WORKSPACE  ← was completely unused (dead import)
 
 from notion_client import Client
 
+from utils.offline import is_offline, offline_message
+
 def get_notion_client():
+    if is_offline():
+        print(offline_message("Notion"))
+        return None
     api_key = os.getenv("NOTION_API_KEY")
     if not api_key:
         print(f"[{datetime.now()}] [VIOLET] No NOTION_API_KEY in env - falling back to markdown")
@@ -20,6 +24,9 @@ def get_notion_client():
         return None
     
 def publish_to_notion(config, title, content, parent_id):
+    if is_offline():
+        print(offline_message("Notion publishing"))
+        return None
     api_key_env = config["notion"]["api_key_env"]
     api_key = os.getenv(api_key_env)
     if not api_key:

@@ -10,6 +10,8 @@
 
 # === Python runtime ===
 __pycache__/
+.pytest_cache/
+.demo-run/
 *.py[cod]
 *$py.class
 *.so

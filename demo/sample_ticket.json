@@ -1,0 +1,6 @@
+{
+  "key": "DEMO-1",
+  "summary": "Add a health check to the sample service",
+  "description": "Add a GET /health response that returns {\"status\": \"ok\"}. Document it in docs/health.md. Do not add dependencies or call external services.",
+  "client_id": "demo"
+}

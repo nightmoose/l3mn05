@@ -1,260 +1,185 @@
-# L3MN05 Architecture (v10+)
+# L3MN05 Architecture
 
-**Version**: v10 Baseline (May 1, 2026)  
-**Status**: Foundational scaffolding complete — skills implementation in progress
+**Updated:** 28 October 2026  
+**Status:** Local-first skills runner with an application air-gap switch. Skills are prompt modules. The orchestrator is the runtime.
 
----
+This document describes the code in this repository. It is not a target-state sketch.
 
-## Overview
+## What it is
 
-L3MN05 is a **local-first, secure, multi-agent software and data engineering consultant system**. It runs ~95% on local hardware using Ollama, with optional remote validation via Grok/xAI. 
+L3MN05 plans engineering work with a local OpenAI-compatible model and writes the result onto a git branch. A worker process can poll Jira when the network is allowed. Demo mode reads a ticket from a JSON file and never calls Jira.
 
-The system automatically:
-- Polls Jira for new work items
-- Plans and implements changes using specialized AI skills
-- Creates clean feature branches and pull requests
-- Updates Jira status and comments
-- Supports multiple clients with isolated configurations
+The model call, the skill prompts, and the tools are separate:
 
-**Core Philosophy (v10)**: Move from a monolithic worker script to a **modular Skills + Tools architecture** for maximum extensibility, testability, and maintainability.
-
----
-
-## High-Level Architecture
+- **Workers** (`worker_scaffold.py`, `worker_improve.py`, `worker_review.py`) are short loops. They pick a Jira status filter and call `run_multi_agent_orchestration`.
+- **Orchestrator** (`orchestrators.py`) asks the model for a plan, parses `## (skill-name)` steps, and runs each step.
+- **Skills** (`skills/*/SKILL.md`) are YAML frontmatter plus instructions. `skills_loader.py` loads them. There is no `BaseSkill` class.
+- **Tools** (`tools/`) do file write, git, Jira, Notion, and `memory.json`. `tools/registry.py` registers five callables: `write_file`, `git_commit_push`, `notion_publish`, `load_memory`, `save_memory`.
+- **Model access** (`utils/llm.py`) talks to the local server first. A remote model is optional and is refused when the offline switch is on.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Jira (Multi-Client)                       │
-│   (To Do → In Progress → Review/Done)                           │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Worker Layer (Status-Driven)                  │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │ worker_scaffold │  │ worker_improve  │  │ worker_review   │ │
-│  │   (Intake)      │  │   (Execution)   │  │   (Validation)  │ │
-│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘ │
-└───────────┼────────────────────┼────────────────────┼──────────┘
-            │                    │                    │
-            ▼                    ▼                    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         Skills Layer                            │
-│  research → code_implementation → data_architect → deployment  │
-│           → documentation → final_review → testing             │
-│  (Pluggable, per-client enabled list)                           │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Tools Registry (Central)                    │
-│  write_file | git_commit_push | notion_publish | memory | jira  │
-│  (Registry Pattern — register / get / execute)                   │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Local LLM (Ollama) + Optional Grok            │
-│         (Blended mode supported per-client)                      │
-└─────────────────────────────────────────────────────────────────┘
+Ticket
+  │  Jira poll (online)  or  demo/sample_ticket.json (demo_run.py)
+  ▼
+worker_*  →  orchestrators.horace_plan  →  local model
+                │
+                ▼
+         parse ## (skill) steps
+                │
+                ▼
+         run_skill_step: prompt = SKILL.md + ticket + repo context
+                │
+                ▼
+         FILE: blocks → tools.file.write_file → git commit
+                │
+                ▼
+         branch left locally
+         GitHub PR only when offline mode is off and gh is authenticated
 ```
 
----
+## Air gap
 
-## Directory Structure
+`utils/offline.py` is the single switch.
+
+- `L3MN05_OFFLINE=1` or `offline: true`
+- The environment variable wins, including `L3MN05_OFFLINE=0` to force the online path
+
+When it is on, call sites for Jira, Notion, Slack, Horace chat, remote validation, `git` network commands, and `gh` return a sentence that the feature is disabled. They do not raise a stack trace for the missing service.
+
+A process-wide hook refuses other outbound sockets and the same network commands if a call site forgets the check. Loopback and the host in `OLLAMA_BASE_URL` stay open so the local model still answers. Docker Compose sets that URL to `http://ollama:11434/v1`. While the switch is on, `ollama-startup.sh` skips `ollama pull` and sets `OLLAMA_NO_CLOUD=1` so the daemon does not refresh recommendation data from ollama.com. A model has to already be on disk.
+
+This is an application switch, not a firewall. Unplug the route when the policy is a real air gap. The Ollama process is a separate binary; `OLLAMA_NO_CLOUD` is the daemon's own opt-out, not a packet filter.
+
+`llm_mode: local` on a client and `validation.enabled: false` stop remote model calls for that path. They do not stop Jira, GitHub, Notion, or Slack.
+
+## Configuration loading
+
+`utils/config.py` does not read `config.yaml` at import. A missing file is an empty mapping. That is what lets tests and `import tools.registry` succeed on a fresh clone before `cp config.example.yaml config.yaml`.
+
+`utils/__init__.py` loads config and the offline guard only. It must not import `utils.worker_core`. That import cycle (`tools.git` → `utils` → `worker_core` → `tools.git`) left `get_repo_paths` half-initialized and broke `import tools.registry`. Workers import `run_main_loop` from `utils.worker_core`.
+
+## Directory layout
 
 ```
 l3mn05/
-├── skills/                    # Pluggable domain-specific capabilities
-│   ├── code_implementation/   # Step-by-step code generation
-│   ├── data_architect/        # ER diagrams, dbt models, data foundations
-│   ├── deployment/            # Vercel, GitHub Actions, Docker, etc.
-│   ├── documentation/         # READMEs, API docs, architecture docs
-│   ├── final_review/          # Cross-cutting review & validation
-│   ├── research/              # Internet research, API docs, best practices
-│   └── testing/               # Test generation & execution
-│
-├── tools/                     # Reusable, cross-cutting primitives
-│   ├── file.py                # File read/write operations
-│   ├── git.py                 # Git commit/push/branch management
-│   ├── jira.py                # Jira API interactions
-│   ├── memory.py              # Persistent memory (memory.json)
-│   ├── notion.py              # Notion publishing
-│   └── registry.py            # Central tool registration & execution
-│
-├── utils/                     # Shared infrastructure
-│   ├── config.py
-│   ├── llm.py                 # Ollama + Grok client wrappers
-│   ├── worker_core.py
-│   └── ...
-│
-├── workers/ (or root)         # Status-driven orchestrators
-│   ├── worker_scaffold.py
-│   ├── worker_improve.py
-│   └── worker_review.py
-│
-├── config.yaml                # Per-client settings (skills, LLM mode, Jira, repos)
+├── skills/                  # one folder per skill, each with SKILL.md
+├── skills_loader.py
+├── orchestrators.py         # plan + skill execution
+├── worker_scaffold.py       # Jira "scaffold" loop; --demo delegates to demo_run
+├── worker_improve.py
+├── worker_review.py
+├── demo_run.py              # CLI: local ticket → branch + PR draft
+├── demo_mode.py
+├── demo/sample_ticket.json
+├── demo/sample_repo/        # tiny repo the demo copies
+├── tools/
+│   ├── registry.py
+│   ├── file.py
+│   ├── git.py
+│   ├── jira.py
+│   ├── memory.py
+│   └── notion.py
+├── utils/
+│   ├── config.py            # lazy yaml + env overrides
+│   ├── offline.py           # the air-gap switch and network guard
+│   ├── llm.py
+│   └── worker_core.py       # poll, clone, branch, cleanup
+├── l3mn05_chat.py           # Flask UI, remote model, disabled while offline
+├── l3mn05_slack.py          # Socket Mode bot, disabled while offline
+├── tests/                   # import, config, offline guard, demo
+├── .github/workflows/ci.yml
 ├── docker-compose.yml
-└── README.md
+├── dockerfile               # workers
+├── dockerfile.chat
+├── dockerfile.slack
+├── config.example.yaml
+└── requirements.txt
 ```
 
+There is no `l3mn05_worker.py` monolith in this tree. The three workers are the entry points.
+
+## Skills
+
+Each skill folder holds `SKILL.md`:
+
+```markdown
+---
+name: "documentation"
+description: "Writes README and design notes"
+allowed_tools: ["write_file", "git_commit_push"]
 ---
 
-## Core Components
-
-### 1. Tools Registry (`tools/registry.py`)
-
-The heart of the v10 architecture — a simple, observable **Registry Pattern** implementation.
-
-**Key Functions:**
-- `register_tool(name, func, description)` — Register any callable as a tool
-- `get_tool(name)` — Retrieve a tool
-- `execute_tool(name, **kwargs)` — Execute with logging and error handling
-
-**Pre-registered Core Tools (at import time):**
-- `write_file` — Write content to repo files
-- `git_commit_push` — Commit + push with branch safety
-- `notion_publish` — Publish markdown to Notion
-- `load_memory` / `save_memory` — Persistent skill memory
-
-**Benefits:**
-- Skills never import implementation details directly
-- Easy to mock for testing
-- New tools can be added without touching skills
-- Timestamped execution logs for observability
-
-### 2. Skills
-
-Skills are **pluggable, focused modules** that encapsulate a specific capability. Each skill:
-- Lives in its own subdirectory under `skills/`
-- Can declare and use tools via the central registry
-- Is enabled/disabled per client in `config.yaml`
-- Follows a consistent interface (to be formalized in `BaseSkill`)
-
-**Current Skills (v10 Baseline):**
-| Skill                | Purpose                              | Typical Stage     |
-|----------------------|--------------------------------------|-------------------|
-| `research`           | Internet research, docs, best practices | Early            |
-| `code_implementation`| Step-by-step code generation         | Core             |
-| `data_architect`     | ER diagrams, dbt, data models        | Core             |
-| `deployment`         | CI/CD, hosting, Docker, env files    | Late             |
-| `documentation`      | READMEs, architecture, API docs      | Late             |
-| `final_review`       | Cross-skill validation & polish      | Final            |
-| `testing`            | Test generation & execution          | Final            |
-
-### 3. Workers (Status-Driven Orchestration)
-
-Instead of one giant loop, work is split across Jira-aligned stages:
-
-- **`worker_scaffold.py`** — Polls "To Do", creates branch, runs initial skills (research + planning)
-- **`worker_improve.py`** — Runs on "In Progress", executes core implementation skills
-- **`worker_review.py`** — Runs on "Review"/"Done", triggers final_review + testing + PR creation
-
-This aligns naturally with real consulting workflows and makes the system easier to debug and scale.
-
-### 4. Configuration & Multi-Client Support
-
-`config.yaml` is the single source of truth:
-
-```yaml
-clients:
-  example-client:
-    jira:
-      url: https://your-company.atlassian.net
-      ...
-    default_repo: your-org/your-repo
-    output_repo: your-org/your-output-repo
-    enabled_skills: [research, code_implementation, data_architect, final_review]
-    llm_mode: blended          # local | remote | blended
-    tech_preferences:
-      backend: python
-      frontend: react
-      database: snowflake
+Instructions for the model.
 ```
 
----
+`load_skills()` returns name, description, instructions, and `allowed_tools`. The orchestrator puts the instructions into the prompt. It then keeps `FILE:` fenced blocks and writes those files. If `git_commit_push` is in `allowed_tools` and a file was written, it commits. Other tool names in the frontmatter are not dispatched from model text. Notion publishing is a separate step in the orchestrator, and only if memory lists Notion as a target.
 
-## Data Flow (Typical Ticket Lifecycle)
+A client's `enabled_skills` list filters which names the planner may use. An unknown `## (name)` line is skipped.
 
-1. **Scaffold Stage**
-   - `worker_scaffold` picks up "To Do" ticket
-   - Creates feature branch `horace-<key>`
-   - Runs `research` + initial planning skills
-   - Saves context to memory
+The research skill does not call a search API. It asks the model to write a factual note from the ticket and the repo context.
 
-2. **Improve Stage**
-   - `worker_improve` picks up "In Progress"
-   - Orchestrates `code_implementation` → `data_architect` → `deployment`
-   - Each skill calls tools via registry (e.g., `execute_tool("write_file", ...)`)
+## Tools and git
 
-3. **Review Stage**
-   - `worker_review` triggers `final_review` + `testing` + `documentation`
-   - Creates PR via `git_commit_push` tool
-   - Updates Jira with summary + link
+`git_commit_push` commits locally, then pushes. Offline, the commit stays and the push is skipped with a disabled message. `create_pr` calls `gh pr create` only when the switch is off. Demo mode always writes `PR_DRAFT.md` so the title and body exist either way.
 
-4. **Memory**
-   - `load_memory` / `save_memory` tools allow skills to share decisions across stages and tickets
+`worker_core.process_ticket_base` clones the client repos, opens a mirror ticket, and creates `l3mn05-<key>`. That path is online-only. Offline, the worker loop tells you to use `demo_run.py` and does not open Jira.
 
----
+## Model routing
 
-## Design Principles
+`call_llm` is the entry the orchestrator uses.
 
-- **Local First** — Ollama is primary; remote calls are opt-in and auditable
-- **Pluggable Everything** — New skills or tools require zero changes to core workers
-- **Observable** — Every tool execution is logged with timestamp
-- **Client-Isolated** — Each client has its own repos, Jira, memory, and skill list
-- **Git-Safe** — All changes happen on isolated branches with clean commits
-- **Extensible by Default** — Adding a new skill is as simple as creating a folder + registering tools
+| Switch | `llm_mode` | What runs |
+| --- | --- | --- |
+| offline | any | Local model only. Remote preference is ignored. No fallback. |
+| online | `local` | Local, then remote only if the local call fails and validation is configured |
+| online | `remote` | Remote for the plan and for skill steps |
+| online | `blended` | Remote for the plan; remote for `final_review` and `documentation`; local otherwise |
 
----
+`prefer_remote` and `grok_review_plan` do nothing while offline. The remote client is built from `validation.base_url`, `validation.api_key_env`, and `validation.model` at call time, not at import.
 
-## Adding a New Skill (Developer Guide)
+Default local URL when nothing is set: `http://127.0.0.1:11434/v1`. A bare host:port gets `/v1` appended. `OLLAMA_MODEL` overrides `local_model`.
 
-1. Create `skills/your_skill_name/`
-2. Implement the skill (following the emerging `BaseSkill` interface)
-3. Register any new tools it needs in `tools/registry.py` (or a skill-specific module)
-4. Add the skill name to `enabled_skills` in the relevant client's `config.yaml`
-5. (Optional) Add a dedicated worker stage if the skill needs special timing
+Local calls send `max_tokens` (2048 when the caller does not set one). A small model with a 4k context will otherwise keep generating until the server aborts.
 
-Example minimal skill skeleton (future):
+## Chat and Slack
 
-```python
-# skills/your_skill_name/skill.py
-from tools.registry import execute_tool
+`l3mn05_chat.py` is a Flask app on port 8080. It reads client names from config when a request arrives, so import does not need `config.yaml`. The reply path calls a remote model. Offline, `POST /chat` returns HTTP 200 and a sentence that chat is disabled.
 
-def run(issue, context, memory):
-    # Your logic here — call execute_tool("write_file", ...) etc.
-    return {"status": "success", "files_written": [...]}
-```
+`l3mn05_slack.py` connects to Slack Socket Mode and the same remote model. Offline, `run_bot()` returns without connecting. In a container (`L3MN05_CONTAINER=1`) it idles so Compose does not restart it.
 
----
+Both images copy `utils/` so they can see the switch. The worker image copies the whole tree.
 
-## Current Status (May 1, 2026)
+## Tests
 
-- ✅ Tools registry implemented and pre-populated
-- ✅ Skills directory structure created (7 skills)
-- ✅ Multi-stage worker scaffolding in progress
-- ✅ Per-client configuration system
-- 🔄 Individual skill implementations (in progress)
-- 🔄 Full migration from legacy `l3mn05_worker.py`
+`pytest` covers:
 
----
+- a fresh interpreter importing the registry, workers, chat, and Slack with no config file
+- env and file overrides for the model URL and the offline flag
+- real socket and HTTP calls to public hosts raising `OfflineBlocked` while loopback is allowed
+- `git push`, `gh`, and `curl` refused by the subprocess hook
+- Jira, Notion, chat, Slack, and the worker poll taking the disabled path
+- demo mode writing `plan.md` and `PR_DRAFT.md` on a local branch with a stand-in model function, and making no socket connections
 
-## Roadmap / Future Enhancements
+CI is `.github/workflows/ci.yml`.
 
-- Formal `BaseSkill` abstract class + validation
-- `skills_loader.py` with auto-discovery
-- Skill-level unit + integration tests
-- Web UI / OpenWebUI integration for manual skill triggering
-- Cost tracking & soft budget enforcement per client
-- Vector memory / RAG for long-term client context
-- Self-improvement loop (use L3MN05 to improve its own skills)
+## Adding a skill
 
----
+1. Create `skills/your_skill/SKILL.md` with `name`, `description`, and `allowed_tools`.
+2. Add the name to the client's `enabled_skills` if that client should use it.
+3. The planner only emits steps for names `load_skills` found. No registry edit is required unless you add a new tool.
+4. New tools go in `tools/`, then `register_tool` in `tools/registry.py`.
 
-**Maintained by**: nightmoose  
-**Last Updated**: May 1, 2026 (v10 Baseline)
+## Not built
 
----
+- A Python `BaseSkill` type. The loader is the interface.
+- Retrieval over past tickets, or a vector store.
+- Enforcement of `soft_daily_budget_usd`.
+- Live web fetch inside the research skill.
+- A quality eval for model output. The smoke tests check wiring with a fake model function.
 
-*This document describes the target architecture. Some components are still being implemented on top of the solid v10 foundation.*
+## Design choices that are in force
+
+- Local model by default, remote only when configured and when the switch is off.
+- Work lands on a branch. Offline mode does not push that branch.
+- One client block in config owns repos, tracker, skill list, and `llm_mode`.
+- Package import stays light so tools can load config without pulling the worker loop.

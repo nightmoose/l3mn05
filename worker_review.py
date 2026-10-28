@@ -1,4 +1,4 @@
-from utils import  run_main_loop
+from utils.worker_core import run_main_loop
 from orchestrators import run_multi_agent_orchestration
 
 def do_reviews(issue_data, client_id, config):
